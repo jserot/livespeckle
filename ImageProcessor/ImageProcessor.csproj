@@ -49,13 +49,13 @@
   </PropertyGroup>
   <ItemGroup>
     <Reference Include="Emgu.CV">
-      <HintPath>..\..\Genika Astro 2.13.2.0 - x64\Genika_Trigger\Genika_Trigger\bin\x64\Release\Emgu.CV.dll</HintPath>
+      <HintPath>..\..\..\Emgu.CV.dll</HintPath>
     </Reference>
     <Reference Include="Emgu.CV.UI">
-      <HintPath>..\..\Genika Astro 2.13.2.0 - x64\Genika_Trigger\Genika_Trigger\bin\x64\Release\Emgu.CV.UI.dll</HintPath>
+      <HintPath>..\..\..\Emgu.CV.UI.dll</HintPath>
     </Reference>
     <Reference Include="Emgu.Util">
-      <HintPath>..\..\Genika Astro 2.13.2.0 - x64\Genika_Trigger\Genika_Trigger\bin\x64\Release\Emgu.Util.dll</HintPath>
+      <HintPath>..\..\..\Emgu.Util.dll</HintPath>
     </Reference>
     <Reference Include="System" />
     <Reference Include="System.Core" />
@@ -71,12 +71,6 @@
     <Compile Include="ClonerHelpers.cs" />
     <Compile Include="ReflectionCloner.cs" />
     <Compile Include="ICloneFactory.cs" />
-    <Compile Include="SettingWindow.cs">
-      <SubType>Form</SubType>
-    </Compile>
-    <Compile Include="SettingWindow.Designer.cs">
-      <DependentUpon>SettingWindow.cs</DependentUpon>
-    </Compile>
     <Compile Include="ImageProcessor.cs" />
     <Compile Include="Properties\AssemblyInfo.cs" />
     <Compile Include="ThreadWindow.cs">
@@ -87,9 +81,6 @@
     </Compile>
   </ItemGroup>
   <ItemGroup>
-    <EmbeddedResource Include="SettingWindow.resx">
-      <DependentUpon>SettingWindow.cs</DependentUpon>
-    </EmbeddedResource>
     <EmbeddedResource Include="ThreadWindow.resx">
       <DependentUpon>ThreadWindow.cs</DependentUpon>
     </EmbeddedResource>

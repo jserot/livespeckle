@@ -1,4 +1,8 @@
-﻿using System;
+﻿// Genika DLL-based Image Processor for real-time computing of auto-correlation
+// Author : J. Serot (jocelyn.serot@free.fr)
+// Version : 0.1
+
+using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Text;
@@ -12,16 +16,27 @@ using Emgu.CV.Structure;
 namespace ImageProcessor
 {
     /*
-    GENIKA INFO: This DLL is an external image processor for you to add image processing in Genika.
-    GENIKA INFO: This DLL is executed when an image is received from the camera grabbing thread and applies to ALL IMAGES that willbe either saved to disk or displayed.
-    GENIKA INFO: This DLL isn't static and is instantiated when Genika opens up. So you can use persistant variable members.
-    GENIKA INFO: You may add you own windows and classes if needed.
+    This DLL is an external image processor for you to add image processing in Genika.
+    The corresponding DLL will be executed whenever an image is received from the camera grabbing thread.
+    It therefore applies to ALL IMAGES that will be either saved to disk or displayed.
+    This DLL isn't static and is instantiated when Genika opens up. So you can use persistant variable members.
     */
+
+    [Flags]
+    public enum VisuOptions
+    {
+        None = 0,
+        LogScale = 1,
+        ShiftQuadrants = 2,
+        Resize = 4
+    }
 
     public class ImageCam
     {
-        /* GENIKA INFO: ImageCam is the image container used in Genika.
-           GENIKA INFO: This is the image format passed by Genika to the DLL. */
+        /*
+        ImageCam is the image container class used in Genika.
+        Do not modify.
+        */
         public ImageCam(int newWidth, int newHeight, Byte[] newBuffer, Byte[] newDisplayBuffer, bool color, Byte[] newRawbuffer, string newDay, string newMonth, string newYear, string newHour, string newMinute, string newSecond, string newMillisecond, string newTicks)
         {
             Width = newWidth;
@@ -58,7 +73,6 @@ namespace ImageProcessor
     }
 
    
-
     public class ImageProcessor
     {
         //DLL required members
@@ -73,8 +87,7 @@ namespace ImageProcessor
         - BayerRG8/BayerRG12/BayerRG16
          */
 
-        private int Offset = 100;
-        private SettingWindow Settings; //Setting window
+        // Genika-related members
         private bool ImageProcessed = false; //Threading flag
         private Thread ProcessingThread; //Processing thread
         private bool ThreadFlag = false; //Processing thread flag
@@ -82,12 +95,16 @@ namespace ImageProcessor
         private ImageCam ThreadedProcessingImageCam; //ImageCam objet to pass the image to the thread
         private ThreadWindow threadwin; //Window of the threaded image processing
 
+        // Application-specific members
+
+        int wSize = 128;    // Size of the processing window
+        Matrix<float> sps;  // Power spectrum accumulator
+        uint accCount;      // Acumulator counter
+
         public ImageProcessor()
         {
-            //Class contructor.
-            //Add your class inits here
-
-            Settings = new SettingWindow();
+            // Class-specific initialisation here
+            // Settings = new SettingWindow(); // No Setting windows here !
         }
 
         public string m_GetFilterName()
@@ -95,15 +112,15 @@ namespace ImageProcessor
             /*
              * This methode is called by Genika to get the name of the filter that will be displayed next to the combobox
              */
-            return "Process example";
+            return "LiveSpeckle 1.0";
         }
 
         public void m_ProcessImage(ref ImageCam Image)
         {
             /*
-             Main processing method that is called from Genika.
+             Main processing method called from Genika.
              The image is passed as a reference with the ImageCam Image variable.
-             !! be carefull : the image size may change with AoI in Genika, as well as the image format.
+             !! Warning : the image size may change with AoI in Genika, as well as the image format.
              The image can be modified directly from this method.
 
             In Genika this processing is positioned first and is executed before any other processing.
@@ -119,30 +136,25 @@ namespace ImageProcessor
             - Dark contruction
             - Focusing assistant
             - Autofocusing thread triggering
+            *************************************************************************
+            - Image saving => your image processing applies to display AND image save 
+            *************************************************************************
             */
 
             if (ImageFormat=="Mono8")
             {
                 //*****************In line processing : same thread as Genika's calling thread***********************
-                for (int i=0; i<Image.Buffer.Length/10; i++)
-                {
-                    //Browse the image buffer
-                    Image.Buffer[i] = (byte)((Image.Buffer[i] + Settings.Offset) % 255);
-                    //Add offset modulo 255 to the first tenth of the image; this is absolutly NOT optimized, divisions are a CPU killer !
-                }
-                //Image has been modified in line with Genika's call.
+                // NOTHING HERE
 
                 //*****************Off line processing : different thread than Genika's calling thread***********************
-                //Theaded processing : that is done without hindering the Genika calling method
-                //Is the thread done with the previous image ?
-                //This flag is set by the other thread.
-                if (ImageProcessed)
+                
+                //Theaded processing : performed without hindering the Genika calling method                
+                if (ImageProcessed)  // Has the concurrent thread finished processing with the previous image ?
                 {
                     //Deep copy the imageCam to the threaded ImageCam objet
                     ThreadedProcessingImageCam = ReflectionCloner.DeepFieldClone(Image);
-                    //Set event
+                    //Notify
                     ThreadEvent.Set();
-                    //Now the copy is processed by the other thread as best effort.
                 }
             }
         }
@@ -154,9 +166,7 @@ namespace ImageProcessor
              This is where you should init your own windows and threads
              */
 
-            //In this example, this shows the setting window
-            Settings.Show();
-            //Then we start the treaded processing
+            // Settings.Show();  // No settings window here
             //First display the window
             threadwin = new ThreadWindow();
             threadwin.Show();
@@ -165,6 +175,12 @@ namespace ImageProcessor
             ThreadFlag = true;
             //Set the flag to process the first image
             ImageProcessed = true;
+            // Initialize application-specific variables
+            wSize = 128;
+            sps = new Matrix<float>(wSize, wSize);  // Power spectrum accumulator
+            sps.SetZero();
+            accCount = 0;
+            // Let's go !
             ProcessingThread = new Thread(ThreadedImageProcessing);
             ProcessingThread.Start();
         }
@@ -176,130 +192,137 @@ namespace ImageProcessor
              This is where you should close/hide your own windows and terminate your threads
              */
 
-            //In this example, this hides the setting window
-            Settings.Hide();
-            //Now we manage the threaded part
-            //Stop the thread by setting the flag
+            // Settings.Hide(); // No settings window here
+            //Stop the thread 
             ThreadFlag = false;
             //Wait the thread to stop
             ProcessingThread.Join();
             //Close the window
             threadwin.Close();
-
         }
 
         public void m_NewAoIInGenika(int Width, int Heigh)
         {
             /*
             This method is called when a new AoI has been defined in Genika
-            That means the payload size has changed !!
             */
-
-            //Display AoI in settings
-            Settings.AoI_label.Text = Width.ToString() + " / " + Heigh.ToString();
         }
 
         public void m_NewImageFormatInGenika(string ImageFormat)
         {
             /*
             This method is called when a new format has been defined in Genika
-            That means the payload size has changed !!
             */
-
-            //Display format in settings
-            Settings.Format_label.Text = ImageFormat;
-        }
+       }
 
         private void ThreadedImageProcessing()
         {
             while (ThreadFlag)
             {
-                //Set palette
-                Bitmap AlignmentBMP = new Bitmap(128, 128, PixelFormat.Format8bppIndexed);
-                ColorPalette colorPalette = AlignmentBMP.Palette;
-                for (int i = 0; i < 256; i++)
-                {
-                    colorPalette.Entries[i] = Color.FromArgb(i, i, i);
-                }
-                AlignmentBMP.Palette = colorPalette;
+                uint accLength = (uint)threadwin.numericUpDown1.Value;
+                int filterSize = (int)threadwin.numericUpDown2.Value;
+                VisuOptions opts = threadwin.checkBox1.Checked ? VisuOptions.Resize : VisuOptions.None;
 
                 //Wait for a thread event for one second. If we don't have the event, the while loop would saturate a core.
                 ThreadEvent.WaitOne(1000);
                 if (ImageProcessed && ThreadedProcessingImageCam != null)
                 {
                     //Previous image has been processed, we have a new one to process
-                    //We set the flag to false so the event could not be raise again by the processor call back
+                    //Set the flag to false so the event could not be raised again by the processor call back
                     ImageProcessed = false;
-
-                    // HERE WE ARE : perform the computations !
-
+                    //Let's work now
                     try
                     {
-                        //Extract a 128*128 image from the coordinates in a bitmap
-                        BitmapData bmpData = AlignmentBMP.LockBits(new Rectangle(0, 0, 128, 128), ImageLockMode.ReadWrite, AlignmentBMP.PixelFormat);
-                        IntPtr ptrBmp = bmpData.Scan0;
-                        if (ThreadedProcessingImageCam.Buffer != null)
+                        // Get Image from Genika Cam
+                        Image<Gray, float> img = get_image();
+
+                        // Compute power spectrum
+                        Matrix<float> ps = power_spectrum(img);
+
+                        // Accumulate
+                        sps = sps.Add(ps);
+                        accCount = accCount + 1;
+
+                        // Build and display results
+
+                        Image<Gray, float> visu2 = visu(ps, VisuOptions.ShiftQuadrants | VisuOptions.LogScale);
+                        if (opts.HasFlag(VisuOptions.Resize))
                         {
-                            System.Runtime.InteropServices.Marshal.Copy(m_ExtractBufferArea(ThreadedProcessingImageCam.Buffer, ThreadedProcessingImageCam.Width / 2 - 64,
-                                 ThreadedProcessingImageCam.Height / 2 - 64, 128, 128, ThreadedProcessingImageCam.Width,
-                                ThreadedProcessingImageCam.Height, ThreadedProcessingImageCam.Width), 0, ptrBmp, 128 * 128);
+                            img = img.Resize(2.0, Emgu.CV.CvEnum.INTER.CV_INTER_NN);
+                            visu2 = visu2.Resize(2.0, Emgu.CV.CvEnum.INTER.CV_INTER_NN);
                         }
-                        AlignmentBMP.UnlockBits(bmpData);
-                        /*
-                        We are using now emgu that is the C# wrapper for OpenCV imaging library.
-                        We could also use directly through DLL import or Pinvoke.
-                        Genika already has the emgu main DLL in its directory, but be carefull :
-                        x86 and x64 DLL are differents !
-                        You must add the DLL as references in the project.
-                        */
+                        threadwin.pictureBox1.Image = img.ToBitmap();
+                        threadwin.pictureBox2.Image = visu2.ToBitmap();
 
-                        /*
-                        /* 
-                        We are now calculating the real FFT image from the extracted image
-                        First we convert the bitmap in an emgu image
-                        */
-                        Image<Gray, float> image = new Image<Gray, System.Single>(AlignmentBMP);
-                        //create an empty complexe image
-                        IntPtr complexImage = CvInvoke.cvCreateImage(image.Size, Emgu.CV.CvEnum.IPL_DEPTH.IPL_DEPTH_32F, 2);
-                        CvInvoke.cvSetZero(complexImage); 
-                        CvInvoke.cvSetImageCOI(complexImage, 1);
-                        CvInvoke.cvCopy(image, complexImage, IntPtr.Zero);
-                        CvInvoke.cvSetImageCOI(complexImage, 0);
-                        //Make a matrix
-                        Matrix<float> dft = new Matrix<float>(image.Rows, image.Cols, 2);
-                        //Calculate the FFT to the matrix
-                        CvInvoke.cvDFT(complexImage, dft, Emgu.CV.CvEnum.CV_DXT.CV_DXT_FORWARD, 0);
-
-                        //The Real part of the Fourier Transform
-                        Matrix<float> outReal = new Matrix<float>(image.Size);
-                        //The imaginary part of the Fourier Transform
-                        Matrix<float> outIm = new Matrix<float>(image.Size);
-                        //Splitting the complex into real/imaginary
-                        CvInvoke.cvSplit(dft, outReal, outIm, IntPtr.Zero, IntPtr.Zero);
-                        //Normalize to 0-255
-                        CvInvoke.cvNormalize(outReal, outReal, 0.0, 255.0, Emgu.CV.CvEnum.NORM_TYPE.CV_MINMAX, IntPtr.Zero);
-
-                        Image<Gray, float> fftImage = new Image<Gray, float>(outReal.Size);
-                        CvInvoke.cvCopy(outReal, fftImage, IntPtr.Zero);
-                        threadwin.pictureBox1.Image = fftImage.Bitmap;
+                        if (accCount >= accLength)  // Each n-th frame
+                        {
+                            // Compute auto-correlation of accumulated power spectrum
+                            Matrix<float> ac = ifft(sps);
+                            // Filter auto-correlation
+                            Matrix<float> fac;
+                            shift_quadrants(ref ac); // Must shift quadrants BEFORE filtering to avoid side effects
+                            if (filterSize > 1)
+                            {
+                                fac = new Matrix<float>(ac.Rows, ac.Cols, 1);
+                                CvInvoke.cvSmooth(ac, fac, Emgu.CV.CvEnum.SMOOTH_TYPE.CV_BLUR, filterSize, filterSize, 0, 0);
+                                CvInvoke.cvSub(ac, fac, fac, IntPtr.Zero);
+                            }
+                            else
+                                fac = ac;
+                            // Display results
+                            Image<Gray, float> visu3 = visu(sps, VisuOptions.ShiftQuadrants | VisuOptions.LogScale);
+                            Image<Rgb, byte> visu4 = color_visu(fac);
+                            if (opts.HasFlag(VisuOptions.Resize))
+                            {
+                                visu3 = visu3.Resize(2.0, Emgu.CV.CvEnum.INTER.CV_INTER_NN);
+                                visu4 = visu4.Resize(2.0, Emgu.CV.CvEnum.INTER.CV_INTER_NN);
+                            }
+                            threadwin.pictureBox3.Image = visu3.ToBitmap();
+                            threadwin.pictureBox4.Image = visu4.ToBitmap();
+                            // Reset accumulation
+                            sps.SetZero();
+                            accCount = 0;
+                        }
                     }
                     catch (Exception e)
                     {
-                        //Swallow
+                        MessageBox.Show(e.Message);
                     }
-                    //We are ready to process another image !
+                    // Ready to process another image !
                     ImageProcessed = true;
                 }
             }
         }
 
+        private Image<Gray,float> get_image()
+        {
+            // TODO : find a more direct way to build an EMGU Image from a buffer..
+            Bitmap bmp = new Bitmap(wSize, wSize, PixelFormat.Format8bppIndexed);
+            ColorPalette colorPalette = bmp.Palette;
+            for (int i = 0; i < 256; i++) colorPalette.Entries[i] = Color.FromArgb(i, i, i);
+            bmp.Palette = colorPalette;
+            Byte[] buf = m_ExtractBufferArea(ThreadedProcessingImageCam.Buffer,
+                                                    ThreadedProcessingImageCam.Width / 2 - wSize / 2,
+                                                    ThreadedProcessingImageCam.Height / 2 - wSize / 2,
+                                                    wSize,
+                                                    wSize,
+                                                    ThreadedProcessingImageCam.Width,
+                                                    ThreadedProcessingImageCam.Height,
+                                                    ThreadedProcessingImageCam.Width);
+            BitmapData bmpData = bmp.LockBits(new Rectangle(0, 0, wSize, wSize), ImageLockMode.ReadWrite, bmp.PixelFormat);
+            if (ThreadedProcessingImageCam.Buffer != null)
+                System.Runtime.InteropServices.Marshal.Copy(buf, 0, bmpData.Scan0, buf.Length);
+            bmp.UnlockBits(bmpData);
+            return new Image<Gray, System.Single>(bmp);
+        }
+
         public byte[] m_ExtractBufferArea(byte[] Source, int X, int Y, int Width, int Height, int CamWidth, int CamHeight, int CamAOI_X) 
         {
-            //Extract a subpart of the image 
+            //Extract subpart of image buffer (8 bits only)
             byte[] Extract = new byte[Width * Height];
             try
             {
-                if (X > 0 && Y > 0 && ((X + Width) < CamWidth) && ((Y + Height) < CamHeight)) //check limits
+                if (X > 0 && Y > 0 && ((X + Width) < CamWidth) && ((Y + Height) < CamHeight)) 
                 {
                     int j = 0; //index for dest
                     for (int i = Y * (int)CamAOI_X + X;
@@ -313,9 +336,143 @@ namespace ImageProcessor
             }
             catch (Exception e)
             {
-                //Swallow
+                MessageBox.Show(e.Message);
             }
             return Extract;
+        }
+
+        Matrix<float> power_spectrum(Image<Gray, float> im)
+        {
+            IntPtr cim = CvInvoke.cvCreateImage(im.Size, Emgu.CV.CvEnum.IPL_DEPTH.IPL_DEPTH_32F, 2);
+            CvInvoke.cvSetZero(cim);
+            CvInvoke.cvSetImageCOI(cim, 1); // Select first channel (0 means all..)
+            CvInvoke.cvCopy(im, cim, IntPtr.Zero);
+            CvInvoke.cvSetImageCOI(cim, 0);
+            // Compute FFT
+            Matrix<float> tf = new Matrix<float>(im.Rows, im.Cols, 2);
+            CvInvoke.cvDFT(cim, tf, Emgu.CV.CvEnum.CV_DXT.CV_DXT_FORWARD, 0);
+            //// Get real and imaginary parts 
+            Matrix<float> r = new Matrix<float>(tf.Size);
+            Matrix<float> i = new Matrix<float>(tf.Size);
+            CvInvoke.cvSplit(tf, r, i, IntPtr.Zero, IntPtr.Zero);
+            CvInvoke.cvMul(r, r, r, 1.0);
+            CvInvoke.cvMul(i, i, i, 1.0);
+            CvInvoke.cvAdd(r, i, r, IntPtr.Zero);
+            CvInvoke.cvReleaseImage(ref cim);  // Do not forget ! 
+            return r;
+        }
+
+        Matrix<float> ifft(Matrix<float> im) // im is a 1-channel image
+        {
+            IntPtr cim = CvInvoke.cvCreateImage(im.Size, Emgu.CV.CvEnum.IPL_DEPTH.IPL_DEPTH_32F, 2);
+            CvInvoke.cvSetZero(cim);
+            CvInvoke.cvSetImageCOI(cim, 1); // Select first channel (0 means all)
+            CvInvoke.cvCopy(im, cim, IntPtr.Zero);
+            CvInvoke.cvSetImageCOI(cim, 0);
+            Matrix<float> tf = new Matrix<float>(im.Rows, im.Cols, 2);
+            CvInvoke.cvDFT(cim, tf, Emgu.CV.CvEnum.CV_DXT.CV_DXT_INVERSE, 0);
+            // get real and imaginary parts 
+            Matrix<float> r = new Matrix<float>(tf.Size);
+            Matrix<float> i = new Matrix<float>(tf.Size);
+            CvInvoke.cvSplit(tf, r, i, IntPtr.Zero, IntPtr.Zero);
+            CvInvoke.cvReleaseImage(ref cim);  // Do not forget ! 
+            return r;
+        }
+
+        private Image<Gray, float> visu(Matrix<float> src, VisuOptions options = VisuOptions.None)
+        {
+            Image<Gray, float> res = new Image<Gray, float>(src.Rows, src.Cols);
+            CvInvoke.cvConvert(src, res);
+            if (options.HasFlag(VisuOptions.ShiftQuadrants)) shift_quadrants(ref res);
+            if (options.HasFlag(VisuOptions.LogScale)) CvInvoke.cvLog(res, res);
+            CvInvoke.cvNormalize(res, res, 0.0, 255.0, Emgu.CV.CvEnum.NORM_TYPE.CV_MINMAX, IntPtr.Zero);
+            if (options.HasFlag(VisuOptions.Resize)) res = res.Resize(2.0, Emgu.CV.CvEnum.INTER.CV_INTER_NN);
+            return res;
+        }
+
+        private Image<Rgb, byte> color_visu(Matrix<float> img, VisuOptions options = VisuOptions.None)
+        {
+            Image<Gray, float> im = new Image<Gray, float>(img.Rows, img.Cols);
+            CvInvoke.cvConvert(img, im);
+            if (options.HasFlag(VisuOptions.ShiftQuadrants)) shift_quadrants(ref im);
+            CvInvoke.cvNormalize(im, im, 0.0, 1.0, Emgu.CV.CvEnum.NORM_TYPE.CV_MINMAX, IntPtr.Zero);
+            Image<Rgb, byte> res = new Image<Rgb, byte>(im.Rows, im.Cols);
+            Rgb c;
+            float[,,] src = im.Data;
+            Byte[,,] dst = res.Data;
+            for (int j = 0; j < res.Rows; j++)
+                for (int i = 0; i < im.Cols; i++)
+                {
+                    c = falsecolor(src[i, j, 0], 0.0, 1.0);
+                    dst[i, j, 0] = (Byte)(255 * c.Red);
+                    dst[i, j, 1] = (Byte)(255 * c.Green);
+                    dst[i, j, 2] = (Byte)(255 * c.Blue);
+                }
+            return res;
+        }
+
+        private Rgb falsecolor(double v, double vmin, double vmax)
+        {
+            Rgb c = new Rgb(1.0, 1.0, 1.0);
+            double dv;
+            if (v < vmin) v = vmin;
+            if (v > vmax) v = vmax;
+            dv = vmax - vmin;
+            if (v < (vmin + 0.25 * dv))
+            {
+                c.Red = 0;
+                c.Green = 4 * (v - vmin) / dv;
+            }
+            else if (v < (vmin + 0.5 * dv))
+            {
+                c.Red = 0;
+                c.Blue = 1 + 4 * (vmin + 0.25 * dv - v) / dv;
+            }
+            else if (v < (vmin + 0.75 * dv))
+            {
+                c.Red = 4 * (v - vmin - 0.5 * dv) / dv;
+                c.Blue = 0;
+            }
+            else
+            {
+                c.Green = 1 + 4 * (vmin + 0.75 * dv - v) / dv;
+                c.Blue = 0;
+            }
+            return c;
+        }
+
+        private void shift_quadrants(ref Image<Gray, float> m)
+        {
+            int cx = m.Cols / 2;
+            int cy = m.Rows / 2;
+            Image<Gray, float> q0 = m.GetSubRect(new Rectangle(0, 0, cx, cy));
+            Image<Gray, float> q1 = m.GetSubRect(new Rectangle(cx, 0, cx, cy));
+            Image<Gray, float> q2 = m.GetSubRect(new Rectangle(0, cy, cx, cy));
+            Image<Gray, float> q3 = m.GetSubRect(new Rectangle(cx, cy, cx, cy));
+            Image<Gray, float> tmp = new Image<Gray, float>(cx, cy);
+            CvInvoke.cvCopy(q0, tmp, IntPtr.Zero);
+            CvInvoke.cvCopy(q3, q0, IntPtr.Zero);
+            CvInvoke.cvCopy(tmp, q3, IntPtr.Zero);
+            CvInvoke.cvCopy(q1, tmp, IntPtr.Zero);
+            CvInvoke.cvCopy(q2, q1, IntPtr.Zero);
+            CvInvoke.cvCopy(tmp, q2, IntPtr.Zero);
+        }
+
+        private void shift_quadrants(ref Matrix<float> m)
+        {
+            int cx = m.Cols / 2;
+            int cy = m.Rows / 2;
+            Matrix<float> q0 = m.GetSubRect(new Rectangle(0, 0, cx, cy));
+            Matrix<float> q1 = m.GetSubRect(new Rectangle(cx, 0, cx, cy));
+            Matrix<float> q2 = m.GetSubRect(new Rectangle(0, cy, cx, cy));
+            Matrix<float> q3 = m.GetSubRect(new Rectangle(cx, cy, cx, cy));
+            Matrix<float> tmp = new Matrix<float>(cx, cy);
+            CvInvoke.cvCopy(q0, tmp, IntPtr.Zero);
+            CvInvoke.cvCopy(q3, q0, IntPtr.Zero);
+            CvInvoke.cvCopy(tmp, q3, IntPtr.Zero);
+            CvInvoke.cvCopy(q1, tmp, IntPtr.Zero);
+            CvInvoke.cvCopy(q2, q1, IntPtr.Zero);
+            CvInvoke.cvCopy(tmp, q2, IntPtr.Zero);
         }
 
     }

@@ -16,12 +16,11 @@ namespace ImageProcessor
             InitializeComponent();
         }
 
-        //Offset value from the trackbar
-        public int Offset = 0;
+        public int wSize = 128;
 
-        private void trackBar1_Scroll(object sender, EventArgs e)
-        {
-            Offset = trackBar1.Value;
-        }
+        private void radioButton1_CheckedChanged(object sender, EventArgs e) { if (radioButton1.Checked) wSize = 64; }
+        private void radioButton2_CheckedChanged(object sender, EventArgs e) { if (radioButton2.Checked) wSize = 128; }
+        private void radioButton3_CheckedChanged(object sender, EventArgs e) { if (radioButton3.Checked) wSize = 256; }
+
     }
 }
